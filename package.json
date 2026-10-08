@@ -1,0 +1,21 @@
+{
+  "name": "BiyaHERO",
+  "version": "1.0.0",
+  "description": "Offline road traffic and road-condition navigation app for Laguna",
+  "main": "BiyaHERO.js",
+  "scripts": {
+    "vendor": "node copy-vendor.mjs",
+    "test": "node --no-warnings tests/native-store.test.mjs"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.4.3",
+    "@capacitor/core": "^8.5.2",
+    "@supabase/supabase-js": "^2.117.2",
+    "leaflet": "^1.9.4",
+    "protomaps-leaflet": "^5.0.1"
+  }
+}

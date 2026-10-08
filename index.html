@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12161C">
+<title>BiyaHERO — Offline Road Hazard & Traffic Map</title>
+<link rel="manifest" href="manifest.json">
+<script>
+
+  (function () {
+    function showFatalBanner(message) {
+      if (document.getElementById('biyahero-fatal-banner')) return;
+      var el = document.createElement('div');
+      el.id = 'biyahero-fatal-banner';
+      el.setAttribute('style',
+        'position:fixed;left:0;right:0;top:0;z-index:999999;' +
+        'background:#B3261E;color:#fff;font:13px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;' +
+        'padding:10px 14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.3);'
+      );
+      el.textContent = message;
+      document.body ? document.body.appendChild(el) : document.addEventListener('DOMContentLoaded', function(){ document.body.appendChild(el); });
+    }
+
+    if (location.protocol === 'file:') {
+      showFatalBanner(
+        'BiyaHERO was opened as a local file (file://) — the app scripts can\'t load this way and nothing will respond. ' +
+        'Serve this folder over http(s):// (a local dev server, or your Capacitor/Android build) and reload.'
+      );
+    }
+
+    window.addEventListener('error', function (e) {
+      showFatalBanner('BiyaHERO hit an error and may not respond to taps: ' + (e && e.message ? e.message : 'unknown error') + ' — reload the app; if this keeps happening, check the browser console.');
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var reason = e && e.reason ? (e.reason.message || e.reason) : 'unknown error';
+      showFatalBanner('BiyaHERO hit an error and may not respond to taps: ' + reason + ' — reload the app; if this keeps happening, check the browser console.');
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="BiyaHERO.css">
+<!-- Leaflet CSS: shipped inside the app (works with no internet). The unpkg URL is only a
+     fallback if vendor/ is missing. See copy-vendor.mjs. -->
+<link rel="stylesheet" href="./vendor/leaflet/leaflet.css" onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'">
+</head>
+<body>
+
+<div class="phone-frame">
+  <div class="phone-notch"></div>
+  <div class="app-shell" id="appShell">
+
+    <!-- Stage: Auth -->
+    <div class="stage active" id="stage-auth">
+      <div class="auth-scroll">
+        <div class="auth-brand">
+          <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2C8.6 2 5.8 4.8 5.8 8.2c0 4.9 6.2 12.3 6.2 12.3s6.2-7.4 6.2-12.3C18.2 4.8 15.4 2 12 2z" fill="#fff"/><path d="M8.4 12.2c1.6-3 3.6-3 5.2 0" stroke="var(--brand-dim)" stroke-width="1.1" stroke-linecap="round" fill="none"/><circle cx="12" cy="8.4" r="2.15" fill="var(--brand)"/></svg></div>
+          <h1>BiyaHERO</h1>
+          <p>Offline-first road traffic & hazard mapping for Luzon commuters.</p>
+        </div>
+
+        <!-- Log-in only. Registration is intentionally NOT on this screen —
+             it lives on its own stage (#stage-signup) so the login screen
+             stays focused on authentication. See "Don't have an account?"
+             link below, and BiyaHERO.js goToSignup()/goToLogin(). -->
+        <div id="loginForm">
+          <div class="auth-field">
+            <label>Email</label>
+            <input type="email" id="loginEmail" placeholder="juan@gmail.com">
+          </div>
+          <div class="auth-field">
+            <label>Password</label>
+            <div class="pw-field-wrap">
+              <input type="password" id="loginPassword" placeholder="••••••••">
+              <button type="button" class="pw-toggle-btn" data-target="loginPassword" aria-label="Show password">
+                <svg class="eye-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="auth-error" id="loginError">Please fill in both fields.</div>
+          <button type="button" class="auth-submit" id="loginSubmitBtn">Log In</button>
+        </div>
+
+        <div class="auth-switch" id="authSwitchLine">
+          Don't have an account? <b id="authSwitchLink">Sign Up</b>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stage: Sign Up (separate screen from Login on purpose — see note
+         above). Creates a regular 'user' account ONLY: the role column is
+         never sent from here, defaults to 'user' in the database, and a
+         database trigger (supabase-setup.sql) blocks any attempt to change
+         it outside of an admin action. There is no role selector here and
+         there never should be. -->
+    <div class="stage" id="stage-signup">
+      <div class="auth-scroll">
+        <div class="auth-brand">
+          <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2C8.6 2 5.8 4.8 5.8 8.2c0 4.9 6.2 12.3 6.2 12.3s6.2-7.4 6.2-12.3C18.2 4.8 15.4 2 12 2z" fill="#fff"/><path d="M8.4 12.2c1.6-3 3.6-3 5.2 0" stroke="var(--brand-dim)" stroke-width="1.1" stroke-linecap="round" fill="none"/><circle cx="12" cy="8.4" r="2.15" fill="var(--brand)"/></svg></div>
+          <h1>Create Account</h1>
+          <p>Sign up as a commuter to start reporting and viewing hazards.</p>
+        </div>
+
+        <div id="signupForm">
+          <div class="auth-field">
+            <label>Username</label>
+            <input type="text" id="signupName" placeholder="juandelacruz" autocomplete="username">
+            <div class="auth-hint" id="signupNameHint">3–20 letters, numbers, or underscores. Must be unique and appropriate.</div>
+          </div>
+          <div class="auth-field">
+            <label>Email</label>
+            <input type="email" id="signupEmail" placeholder="juan@gmail.com">
+            <div class="auth-hint">Gmail addresses only (@gmail.com). You'll need to verify it from your inbox before logging in.</div>
+          </div>
+          <div class="auth-field">
+            <label>Password</label>
+            <div class="pw-field-wrap">
+              <input type="password" id="signupPassword" placeholder="At least 8 characters">
+              <button type="button" class="pw-toggle-btn" data-target="signupPassword" aria-label="Show password">
+                <svg class="eye-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <div class="pw-strength" id="signupPwStrength">
+              <div class="pw-strength-bar"><div class="pw-strength-fill" id="signupPwStrengthFill"></div></div>
+              <div class="pw-strength-label" id="signupPwStrengthLabel">Very Weak</div>
+              <ul class="pw-requirements" id="signupPwRequirements">
+                <li data-req="length">At least 8 characters</li>
+                <li data-req="upper">An uppercase letter (A-Z)</li>
+                <li data-req="lower">A lowercase letter (a-z)</li>
+                <li data-req="number">A number (0-9)</li>
+                <li data-req="symbol">A symbol (!@#$%…)</li>
+              </ul>
+            </div>
+          </div>
+          <div class="auth-field">
+            <label>Confirm Password</label>
+            <div class="pw-field-wrap">
+              <input type="password" id="signupConfirmPassword" placeholder="Re-enter your password">
+              <button type="button" class="pw-toggle-btn" data-target="signupConfirmPassword" aria-label="Show password">
+                <svg class="eye-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <div class="pw-match" id="signupPwMatch"></div>
+          </div>
+          <div class="auth-error" id="signupError">Please complete all fields.</div>
+          <button type="button" class="auth-submit" id="signupSubmitBtn">Create Account</button>
+        </div>
+
+        <div class="auth-switch" id="signupSwitchLine">
+          Already have an account? <b id="signupSwitchLink">Log In</b>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stage: Download Offline Map -->
+    <div class="stage" id="stage-download">
+      <div class="download-stage-inner">
+        <div class="map-illustration">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"/><path d="M8 2v16M16 6v16"/></svg>
+          <svg class="pin-drop" viewBox="0 0 24 24" fill="var(--status-red)" stroke="var(--shell)" stroke-width="1" width="22" height="22" style="position:absolute; top:28px; left:50px;"><path d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8zm0 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></svg>
+        </div>
+        <h2 id="dlGreeting">Welcome, Juan!</h2>
+        <p>Download the offline map for <b>Luzon</b> — BiyaHERO's initial coverage area. Once downloaded, it's stored on your device so you can navigate and report hazards even without a connection.</p>
+
+        <div class="dl-progress-wrap" id="dlProgressWrap" style="display:none;">
+          <div class="dl-track"><div class="dl-fill" id="dlFill"></div></div>
+          <div class="dl-status" id="dlStatusText">Downloading Luzon map… 0%</div>
+        </div>
+
+        <button class="dl-btn" id="dlStartBtn">Download Offline Map (150 MB)</button>
+        <button class="dl-btn secondary" id="dlContinueBtn" style="display:none;">Continue to BiyaHERO →</button>
+      </div>
+    </div>
+
+    <!-- Stage: Main App -->
+    <div class="stage" id="stage-app">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-top-row">
+        <div class="brand-lockup">
+          <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 2C8.6 2 5.8 4.8 5.8 8.2c0 4.9 6.2 12.3 6.2 12.3s6.2-7.4 6.2-12.3C18.2 4.8 15.4 2 12 2z" fill="#fff"/><path d="M8.4 12.2c1.6-3 3.6-3 5.2 0" stroke="var(--brand-dim)" stroke-width="1.1" stroke-linecap="round" fill="none"/><circle cx="12" cy="8.4" r="2.15" fill="var(--brand)"/></svg></div>
+          <div class="brand-name">BiyaHERO</div>
+        </div>
+        <!-- Theme toggle intentionally lives only in Settings now (see
+             darkModeSwitch) — setTheme() itself is unchanged, so Settings
+             still fully controls light/dark. themeIcon's old id is kept
+             out of the DOM rather than orphaned/hidden, since nothing
+             else references it. -->
+      </div>
+      <div class="header-boxes">
+        <!-- Box 1: Status -->
+        <div class="offline-badge offline" id="offlineBadge">
+          <span class="dot"></span>
+          <span id="offlineBadgeText">Offline Mode: Luzon Map Active</span>
+        </div>
+
+        <!-- Box 2: Route visibility (origin -> destination) -->
+        <div class="route-box" id="routeBox" data-gps="searching">
+          <div class="route-box-row row-origin">
+            <span class="dot"></span>
+            <span class="route-box-label" id="routeBoxOrigin">Locating…</span>
+            <span class="route-box-tag" id="routeBoxTag">LOCATING…</span>
+          </div>
+          <div class="route-box-connector" id="routeBoxConnector" style="display:none;"></div>
+          <div class="route-box-row row-dest" id="routeBoxDestRow" style="display:none;">
+            <span class="dot"></span>
+            <span class="route-box-label placeholder" id="routeBoxDest">Search a destination…</span>
+          </div>
+        </div>
+
+        <!-- Box 3: search -->
+        <div class="search-bar" id="searchBar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="text" placeholder="Where to? (works offline)" readonly>
+        </div>
+      </div>
+
+      <!-- Map-focus toggle: folds away the status badge / route summary /
+           search bar (items 4 & 7 of the UI rework — keeping GPS location
+           and destination controls, plus the road-legend traffic
+           indicator, from permanently covering the map). Re-tap to bring
+           them back; does nothing to the nav banner / route info card,
+           which stay visible during active navigation regardless. -->
+      <button class="map-focus-toggle" id="mapFocusToggle" aria-label="Hide search controls">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+      </button>
+      <div class="search-dual" id="searchDual">
+        <div class="search-dual-row row-origin">
+          <span class="dot"></span>
+          <input type="text" id="originInput" value="Current Location">
+        </div>
+        <div class="search-dual-row row-dest">
+          <span class="dot"></span>
+          <input type="text" id="destInput" placeholder="Search destination…" autocomplete="off">
+        </div>
+        <div class="search-suggestions" id="searchSuggestions"></div>
+
+        <!-- Transport mode: picks which routing profile + speed/traffic
+             assumptions are used for the route about to be requested.
+             Plain line icons (no emoji) so the row reads as UI chrome,
+             not decoration; grey by default, brand-colored only when
+             selected (see .transport-mode-btn.active in CSS). "Car" is
+             selected by default, matching prior behavior. -->
+        <div class="transport-mode-row" id="transportModeRow">
+          <button class="transport-mode-btn" data-mode="walking" type="button" aria-label="Walking">
+            <svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="13.2" cy="4.2" r="1.6" fill="currentColor" stroke="none"/>
+              <path d="M10.5 21l1.3-5.6-1.8-1.9.9-3.8 2.8.9 1.9 2.8-.9 2.8 2.8 1.9-.9 3.6"/>
+            </svg>
+            <span class="tm-label">Walk</span>
+          </button>
+          <button class="transport-mode-btn" data-mode="transit" type="button" aria-label="Transit">
+            <svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4.5" y="5" width="15" height="11" rx="2.2"/>
+              <path d="M4.5 11h15M8 16v1.6M16 16v1.6"/>
+              <circle cx="8" cy="19" r="1.3" fill="currentColor" stroke="none"/>
+              <circle cx="16" cy="19" r="1.3" fill="currentColor" stroke="none"/>
+            </svg>
+            <span class="tm-label">Transit</span>
+          </button>
+          <button class="transport-mode-btn" data-mode="motorcycle" type="button" aria-label="Motorcycle">
+            <svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="5.6" cy="17.6" r="2.4"/>
+              <circle cx="18.4" cy="17.6" r="2.4"/>
+              <path d="M8 17.6h5l2-5h3M13 12.6l-2-3-3.4 1.1M6.2 12.6h3"/>
+            </svg>
+            <span class="tm-label">Motorcycle</span>
+          </button>
+          <button class="transport-mode-btn active" data-mode="car" type="button" aria-label="Car">
+            <svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 16l1.5-5A2 2 0 0 1 7.4 9.5h9.2A2 2 0 0 1 18.5 11L20 16"/>
+              <rect x="3" y="16" width="18" height="4" rx="1.4"/>
+              <circle cx="7.5" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+              <circle cx="16.5" cy="20" r="1.4" fill="currentColor" stroke="none"/>
+            </svg>
+            <span class="tm-label">Car</span>
+          </button>
+        </div>
+
+        <div class="search-dual-actions">
+          <button class="search-cancel-btn" id="searchCancelBtn">Cancel</button>
+          <button class="search-go-btn" id="searchGoBtn">Show Route</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Views -->
+    <div class="view-container">
+
+      <!-- Map View -->
+      <section class="view active" id="view-map">
+        <div class="map-wrap">
+          <div id="leafletMap"></div>
+
+          <!-- Turn-by-turn navigation banner (only visible while navigating) -->
+          <div class="nav-banner" id="navBanner">
+            <div class="nav-banner-icon" id="navBannerIcon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </div>
+            <div class="nav-banner-text">
+              <div class="nav-banner-instruction" id="navBannerInstruction">Head out</div>
+              <div class="nav-banner-sub" id="navBannerSub">Fetching route…</div>
+            </div>
+            <button class="nav-banner-stop" id="navBannerStopBtn" aria-label="Stop navigation">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <!-- Route info card: mode-aware distance/time/traffic/ETA for the
+               active (or just-recalculated) route. Hidden until a route
+               exists; kept up to date every GPS tick during navigation. -->
+          <div class="route-info-card" id="routeInfoCard" style="display:none;">
+            <div class="ric-mode" id="ricMode"><svg class="tm-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l1.5-5A2 2 0 0 1 7.4 9.5h9.2A2 2 0 0 1 18.5 11L20 16"/><rect x="3" y="16" width="18" height="4" rx="1.4"/><circle cx="7.5" cy="20" r="1.4" fill="currentColor" stroke="none"/><circle cx="16.5" cy="20" r="1.4" fill="currentColor" stroke="none"/></svg></div>
+            <div class="ric-stats">
+              <div class="ric-row">
+                <span class="ric-distance" id="ricDistance">— km</span>
+                <span class="ric-sep">•</span>
+                <span class="ric-time" id="ricTime">— min</span>
+              </div>
+              <div class="ric-row">
+                <span class="ric-traffic" id="ricTraffic">—</span>
+                <span class="ric-eta" id="ricEta"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="traffic-legend" id="trafficLegend" style="display:none;">
+            <div class="legend-chip"><i style="background:var(--status-green)"></i><span>Low</span></div>
+            <div class="legend-chip"><i style="background:var(--status-yellow)"></i><span>Moderate</span></div>
+            <div class="legend-chip"><i style="background:var(--status-orange)"></i><span>Heavy</span></div>
+            <div class="legend-chip"><i style="background:var(--status-red)"></i><span>Severe</span></div>
+          </div>
+
+          <div class="hazard-alert" id="hazardAlert">
+            <div class="hazard-alert-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.7 3.86a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            </div>
+            <div class="hazard-alert-text">
+              <div class="hazard-alert-title" id="hazardAlertTitle">Hazard ahead</div>
+              <div class="hazard-alert-sub" id="hazardAlertSub">On your route · 200m</div>
+            </div>
+            <button class="hazard-alert-close" id="hazardAlertClose" aria-label="Dismiss">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+
+          <!-- Hazard pin chat card (dynamic hazards only) -->
+          <div class="hazard-chat-backdrop" id="hazardChatBackdrop"></div>
+          <div class="hazard-chat-card" id="hazardChatCard">
+            <button class="hazard-chat-trash" id="hazardChatTrash" aria-label="Delete report">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+            </button>
+            <div class="hazard-chat-head">
+              <div class="hazard-chat-avatar" id="hazardChatAvatar"></div>
+              <div class="hazard-chat-bubble">
+                <div class="hazard-chat-title" id="hazardChatTitle">Pothole</div>
+                <div class="hazard-chat-meta" id="hazardChatMeta">Reported just now</div>
+                <div class="hazard-chat-note" id="hazardChatNote">Reported near your current route.</div>
+              </div>
+            </div>
+          </div>
+
+          <button class="legend-toggle-btn" id="legendToggleBtn" aria-label="Toggle traffic legend">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+
+          <div class="zoom-ctrl" id="zoomCtrl">
+            <button class="zoom-btn zoom-in" id="zoomInBtn" aria-label="Zoom in">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button class="zoom-btn zoom-out" id="zoomOutBtn" aria-label="Zoom out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>
+            </button>
+          </div>
+          <div class="legend-strip" id="legendStrip">
+            <div class="legend-chip"><i style="background:var(--status-red)"></i><span>Heavy Traffic</span></div>
+            <div class="legend-chip"><i style="background:var(--status-yellow)"></i><span>Moderate</span></div>
+            <div class="legend-chip"><i style="background:var(--status-blue)"></i><span>Frequent Road</span></div>
+            <div class="legend-chip"><i style="background:var(--status-gray)"></i><span>Rarely Used</span></div>
+          </div>
+
+          <div class="speedo-card" id="speedoCard">
+            <div class="speedo-ring" id="speedoRing">
+              <div class="speedo-inner"><b id="speedoValue">12</b><span>KM/H</span></div>
+            </div>
+            <div class="speedo-text">
+              <div class="speedo-label" id="speedoLabel">Heavy Traffic</div>
+              <div class="speedo-sub" id="speedoSub">Expected 40 km/h</div>
+            </div>
+          </div>
+
+          <button class="fab" id="fabReport" aria-label="Report a hazard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+
+          <button class="locate-btn" id="locateBtn" aria-label="Center my location">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+          </button>
+
+          <button class="recenter-btn" id="recenterBtn" aria-label="Re-center on my location" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>
+            <span>Re-center</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Community View -->
+      <section class="view" id="view-community">
+        <div class="panel-view" id="communityScroll">
+          <div class="panel-header">
+            <h2>Community Reports</h2>
+            <p>Nearby hazards — confirm or dispute to help keep the map accurate.</p>
+          </div>
+          <div id="feedControls"></div>
+          <div id="hazardFeed"></div>
+        </div>
+      </section>
+
+      <!-- Settings View -->
+      <section class="view" id="view-settings">
+        <div class="panel-view">
+          <div class="panel-header">
+            <h2>Settings</h2>
+            <p>Appearance, offline maps, and data sync.</p>
+          </div>
+
+          <div class="settings-group">
+            <h3>Account</h3>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-title" id="acctName">Juan Dela Cruz</div>
+                  <div class="settings-row-sub" id="acctEmail">juan@example.com</div>
+                </div>
+              </div>
+              <!-- Shown only while an offline signup is queued on this
+                   device (see PendingAuth / updatePendingAccountBanner in
+                   BiyaHERO.js). Hidden the rest of the time. -->
+              <div class="settings-row" id="pendingAccountRow" style="display:none;">
+                <div>
+                  <div class="settings-row-title" id="pendingAccountTitle">Account will sync when online</div>
+                  <div class="settings-row-sub" id="pendingAccountSub">Queued — you can keep using BiyaHERO in the meantime.</div>
+                </div>
+              </div>
+              <div class="settings-row" id="logoutRow" style="cursor:pointer;">
+                <div class="settings-row-title" style="color:var(--status-red);">Log Out</div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group" id="adminRow" style="display:none;">
+            <h3>Admin</h3>
+            <div class="settings-card">
+              <div class="settings-row" id="openAdminDashboardRow" style="cursor:pointer;">
+                <div>
+                  <div class="settings-row-title">Admin Dashboard</div>
+                  <div class="settings-row-sub">Moderate reports, manage POIs, and manage Admin accounts</div>
+                </div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Appearance</h3>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-title">Dark mode</div>
+                  <div class="settings-row-sub">Easier on the eyes at night</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="darkModeSwitch">
+                  <span class="track"></span><span class="knob"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Map Layers</h3>
+            <div class="settings-card" id="poiVisibilityCard">
+              <!-- One row per POI category, built by renderPoiVisibilityControls()
+                   in BiyaHERO.js so this always matches whatever categories
+                   actually exist — see POI_ICON_SVG there. -->
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Offline Map</h3>
+            <div class="settings-card">
+              <div class="storage-block">
+                <div class="storage-top">
+                  <div class="storage-title">Luzon Region Map</div>
+                  <div class="storage-size" id="mapStorageSize">150 MB · Downloaded</div>
+                </div>
+                <div class="storage-track"><div class="storage-fill" id="mapStorageFill" style="width:100%"></div></div>
+                <div class="storage-actions">
+                  <div class="btn-mini" id="updateMapBtn">Update Map</div>
+                  <div class="btn-mini danger" id="deleteMapBtn">Delete</div>
+                </div>
+                <div class="storage-sub-line" id="sessionTileCountLine" style="display:none;">
+                  <span id="sessionTileCountText">0 tiles cached this session</span>
+                </div>
+                <div class="storage-sub-line" id="actualStorageLine">
+                  <span id="actualStorageText">Actual device storage: checking…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Connectivity</h3>
+            <div class="settings-card">
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-title">Network status</div>
+                  <div class="settings-row-sub" id="networkSub">Offline — using local Luzon map</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="networkSwitch">
+                  <span class="track"></span><span class="knob"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <div class="settings-row-title">Auto-sync reports</div>
+                  <div class="settings-row-sub" id="autoSyncSub">On — reports upload as soon as you're online</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="autoSyncSwitch" checked>
+                  <span class="track"></span><span class="knob"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h3>Pending Sync Queue</h3>
+            <div class="settings-card" id="syncQueueCard">
+              <!-- filled by JS -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-view="view-map">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 6v16l7-4 8 4 7-4V2l-7 4-8-4-7 4z"/><path d="M8 2v16M16 6v16"/></svg>
+        Map
+      </button>
+      <button class="nav-item" data-view="view-community">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 1 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg>
+        Community
+      </button>
+      <button class="nav-item" data-view="view-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </nav>
+
+    <!-- Hazard Report Sheet -->
+    <div class="sheet-backdrop" id="sheetBackdrop"></div>
+    <div class="report-sheet" id="reportSheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2>Report a Hazard</h2>
+        <button class="icon-btn" id="closeSheetBtn" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="sheet-tabs">
+        <div class="sheet-tab active" data-tab="manual">Manual</div>
+        <div class="sheet-tab" data-tab="voice">Voice Command</div>
+      </div>
+      <div class="sheet-body">
+
+        <!-- Manual Form -->
+        <div id="tabpanel-manual">
+          <div class="field-label">Hazard Type</div>
+          <div class="pill-grid" id="categoryPills">
+            <div class="cat-pill" data-cat="Pothole"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M4 15c1-3 3-5 5-6.5 3-2 6.5-2 9 .5 2 2 2.5 5 1 7.5-2 3.5-6 4.5-9.5 3-3-1.4-4.5-3-5.5-4.5z"/></svg> Pothole</div>
+            <div class="cat-pill" data-cat="Flooded Street"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M3 9.5c1.4-1.6 2.8-1.6 4.2 0s2.8 1.6 4.2 0 2.8-1.6 4.2 0 2.8 1.6 4.2 0"/><path d="M3 14.5c1.4-1.6 2.8-1.6 4.2 0s2.8 1.6 4.2 0 2.8-1.6 4.2 0 2.8 1.6 4.2 0"/><path d="M3 19.5c1.4-1.6 2.8-1.6 4.2 0s2.8 1.6 4.2 0 2.8-1.6 4.2 0 2.8 1.6 4.2 0"/></svg> Flooded Street</div>
+            <div class="cat-pill" data-cat="Road Construction"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 3l4.5 14.5H7.5z"/><path d="M6 20.5h12M7 17.5h10M9 11h6"/></svg> Road Construction</div>
+            <div class="cat-pill" data-cat="Accident"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 2l1.8 5.6L19 6l-3 4.8L21 13l-5.6 1L17 20l-5-3.4L7 20l1.6-6-5.6-1 5-5.2L5 6l5.2 1.6z"/></svg> Accident</div>
+            <div class="cat-pill" data-cat="Road Bump"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 17c3-6 6.5-9 10-9s7 3 10 9"/><path d="M2 17h20"/></svg> Road Bump</div>
+            <div class="cat-pill" data-cat="Temporary Closure"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M3 8.5l18-3M3 16.5l18-3"/><path d="M6 4.5v16M18 1.5v16"/></svg> Temporary Closure</div>
+          </div>
+
+          <div class="field-label">Location (auto-attached)</div>
+          <div class="gps-chip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            14.5995° N, 120.9842° E — accuracy ±6m
+          </div>
+
+          <div class="field-label">Note (optional)</div>
+          <textarea class="note-input" id="noteInput" placeholder="Add any helpful detail…"></textarea>
+
+          <button class="submit-btn" id="submitManualBtn" disabled>Select a hazard type to continue</button>
+
+          <div class="storage-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>
+            <span>You're offline. This report will be saved locally on your device and synced automatically once you're back online.</span>
+          </div>
+        </div>
+
+        <!-- Voice Tab -->
+        <div id="tabpanel-voice" style="display:none;">
+          <div class="voice-stage">
+            <div class="mic-orb" id="micOrb">
+              <span class="mic-ring"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg>
+            </div>
+            <div class="voice-status" id="voiceStatus">Tap the mic to report hands-free</div>
+            <div class="voice-transcript" id="voiceTranscript">"Road bump ahead."</div>
+            <div class="voice-actions" id="voiceActions">
+              <div class="btn-mini danger" id="voiceCancelBtn" style="flex:1">Cancel</div>
+              <div class="btn-mini primary" id="voiceConfirmBtn" style="flex:1">Confirm & Save</div>
+            </div>
+          </div>
+          <div class="storage-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>
+            <span>Voice reports capture GPS, timestamp, and hazard type automatically — no need to look at your screen.</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Admin Dashboard: hazard-report moderation + POI management. Only
+         ever opened when isAdmin() is true (see BiyaHERO.js), but every
+         action inside it is protected server-side by RLS regardless —
+         see supabase-setup.sql — so this markup existing in the page
+         source isn't itself a privilege leak. -->
+    <div class="sheet-backdrop" id="adminBackdrop"></div>
+    <div class="report-sheet" id="adminDashboard">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2>Admin Dashboard</h2>
+        <button class="icon-btn" id="closeAdminDashboardBtn" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="sheet-tabs">
+        <div class="sheet-tab active" data-admintab="reports">Hazard Reports</div>
+        <div class="sheet-tab" data-admintab="pois">Map POIs</div>
+        <div class="sheet-tab" data-admintab="admins">Admin Management</div>
+      </div>
+      <div class="sheet-body">
+        <div id="admintabpanel-reports">
+          <div class="field-label">Hazard Reports — All Commuters</div>
+          <div id="adminReportsList"><div class="sync-empty">Loading…</div></div>
+        </div>
+        <div id="admintabpanel-pois" style="display:none;">
+          <div class="field-label">Add a POI</div>
+          <div class="poi-form">
+            <input type="text" id="poiFormName" placeholder="Name (e.g. Petron – Brgy. San Juan)">
+            <input type="text" id="poiFormSub" placeholder="Sub-label (e.g. National Hwy, Cabuyao City)">
+            <select id="poiFormCategory"></select>
+            <div class="poi-form-row">
+              <input type="text" id="poiFormLat" placeholder="Latitude (e.g. 14.2814)">
+              <input type="text" id="poiFormLng" placeholder="Longitude (e.g. 121.4157)">
+            </div>
+            <button class="submit-btn" id="poiFormSubmitBtn">Add POI</button>
+            <div class="auth-error" id="poiFormError"></div>
+          </div>
+          <div class="field-label">Existing POIs</div>
+          <div id="adminPoisList"><div class="sync-empty">Loading…</div></div>
+        </div>
+
+        <!-- Admin Management: this is the ONLY place a new Admin account
+             can be created anywhere in the app — there is no equivalent
+             control on the public Sign-Up page, the Login page, or any
+             user-facing menu. It only renders here because this whole
+             sheet only opens for isAdmin()===true accounts, and even so
+             every action below is re-checked server-side (see the
+             create-admin Edge Function + is_admin()-gated RLS policies in
+             supabase-setup.sql) — hiding this tab is a convenience, not
+             the actual security boundary. -->
+        <div id="admintabpanel-admins" style="display:none;">
+          <div class="field-label">Create Admin Account</div>
+          <div class="poi-form" id="adminCreateForm">
+            <input type="text" id="adminCreateName" placeholder="Username (letters, numbers, underscores)" autocomplete="username">
+            <input type="email" id="adminCreateEmail" placeholder="admin@gmail.com">
+            <div class="pw-field-wrap">
+              <input type="password" id="adminCreatePassword" placeholder="At least 8 characters">
+              <button type="button" class="pw-toggle-btn" data-target="adminCreatePassword" aria-label="Show password">
+                <svg class="eye-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <div class="pw-strength" id="adminCreatePwStrength">
+              <div class="pw-strength-bar"><div class="pw-strength-fill" id="adminCreatePwStrengthFill"></div></div>
+              <div class="pw-strength-label" id="adminCreatePwStrengthLabel">Very Weak</div>
+              <ul class="pw-requirements" id="adminCreatePwRequirements">
+                <li data-req="length">At least 8 characters</li>
+                <li data-req="upper">An uppercase letter (A-Z)</li>
+                <li data-req="lower">A lowercase letter (a-z)</li>
+                <li data-req="number">A number (0-9)</li>
+                <li data-req="symbol">A symbol (!@#$%…)</li>
+              </ul>
+            </div>
+            <div class="pw-field-wrap">
+              <input type="password" id="adminCreateConfirmPassword" placeholder="Re-enter password">
+              <button type="button" class="pw-toggle-btn" data-target="adminCreateConfirmPassword" aria-label="Show password">
+                <svg class="eye-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                <svg class="eye-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.86 21.86 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><path d="M1 1l22 22"/></svg>
+              </button>
+            </div>
+            <div class="pw-match" id="adminCreatePwMatch"></div>
+            <button class="submit-btn" id="adminCreateSubmitBtn">Create Admin Account</button>
+            <div class="auth-error" id="adminCreateError"></div>
+          </div>
+          <div class="field-label">Existing Admin Accounts</div>
+          <div id="adminAccountsList"><div class="sync-empty">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Dialog: reused for Logout, Delete Map, Delete Report, etc. -->
+    <div class="confirm-dialog-backdrop" id="confirmDialogBackdrop"></div>
+    <div class="confirm-dialog" id="confirmDialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmDialogTitle">
+      <div class="confirm-dialog-title" id="confirmDialogTitle">Are you sure?</div>
+      <div class="confirm-dialog-message" id="confirmDialogMessage">This action cannot be undone.</div>
+      <div class="confirm-dialog-voice-hint" id="confirmDialogVoiceHint" style="display:none;">Say "Yes" to confirm or "No" to cancel</div>
+      <div class="confirm-dialog-actions">
+        <button type="button" class="confirm-dialog-btn cancel" id="confirmDialogCancelBtn">Cancel</button>
+        <button type="button" class="confirm-dialog-btn confirm" id="confirmDialogConfirmBtn">Confirm</button>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"><span class="dot"></span><span id="toastText">Saved</span></div>
+
+    </div><!-- /Stage-app -->
+
+  </div>
+</div>
+
+<!-- Third-party libraries are loaded from ./vendor first so the app starts with NO internet
+     (a CDN <script> that can't download leaves `L` / `supabase` undefined and kills the whole app).
+     The CDN copy is only a fallback for when ./vendor hasn't been created yet. -->
+<script src="./vendor/leaflet/leaflet.js"></script>
+<script>window.L || document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');</script>
+
+<!-- protomaps-leaflet exposes the global `protomapsL` (classic script, must run before the
+     module below). PMTiles is NOT loaded here any more: protomaps-map.js imports ./pmtiles.js
+     itself, so there is no window.PMTiles ordering dependency. Paths are relative so the app
+     also works when hosted under a sub-path. -->
+<script src="./vendor/protomaps/protomaps-leaflet.js"></script>
+<script>window.protomapsL || document.write('<script src="https://unpkg.com/protomaps-leaflet@5.0.1/dist/protomaps-leaflet.js"><\/script>');</script>
+
+<script src="./vendor/supabase/supabase.js"></script>
+<script>window.supabase || document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');</script>
+
+<script src="./vendor/supabase/supabase.js"></script>
+
+</html>

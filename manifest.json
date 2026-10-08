@@ -1,0 +1,88 @@
+{
+  "id": "/index.html",
+  "name": "BiyaHERO — Offline Road Hazard & Traffic Map",
+  "short_name": "BiyaHERO",
+  "description": "Offline-first road hazard and traffic map for Luzon commuters. See live hazard reports, plan routes, and keep navigating even with zero signal.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "lang": "en",
+  "dir": "ltr",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "background_color": "#12161C",
+  "theme_color": "#12161C",
+  "orientation": "portrait",
+  "categories": ["navigation", "travel", "utilities"],
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/screenshot-login.png",
+      "sizes": "412x915",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Sign in to BiyaHERO"
+    },
+    {
+      "src": "screenshots/screenshot-settings.png",
+      "sizes": "412x915",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Manage your offline map, account, and connectivity"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Report a Hazard",
+      "short_name": "Report",
+      "description": "Jump straight to reporting a road hazard",
+      "url": "./index.html?shortcut=report",
+      "icons": [
+        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Community Reports",
+      "short_name": "Community",
+      "description": "See nearby hazard reports from other commuters",
+      "url": "./index.html?shortcut=community",
+      "icons": [
+        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings",
+      "description": "Manage your offline map and account",
+      "url": "./index.html?shortcut=settings",
+      "icons": [
+        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ], 
+  "edge_side_panel": {
+    "preferred_width": 420
+  }
+}
